@@ -1,4 +1,5 @@
 [CmdletBinding()]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingWriteHost", "")]
 param(
     [ValidateSet("auto","safe","aggressive","gaming","workstation")]
     [string]$Level = "auto",
@@ -72,7 +73,7 @@ function Get-HardwareProfile {
 
     # GPU detection: nvidia-smi > dxdiag > WMI
     $nvidiaSmi = $null
-    try { $nvidiaSmi = & nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>$null } catch {}
+    try { $nvidiaSmi = & nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>$null } catch { $null }
     if ($nvidiaSmi) {
         $parts = $nvidiaSmi.Split(',')
         $p.GPU.Name = $parts[0].Trim()
@@ -139,12 +140,12 @@ function Get-HardwareProfile {
                 SizeInch = $sizeInch; VideoInput = $videoInput; Year = $year; Week = $week
             }
         }
-    } catch {}
+    } catch { $null }
 
     try {
         $vc = Get-CimInstance Win32_VideoController | Where-Object { $_.CurrentHorizontalResolution -gt 0 } | Select-Object -First 1
         if ($vc) { $p.DisplayResolution = "$($vc.CurrentHorizontalResolution) x $($vc.CurrentVerticalResolution) @ $($vc.CurrentRefreshRate)Hz" }
-    } catch {}
+    } catch { $null }
 
     return $p
 }
@@ -165,7 +166,7 @@ function Get-SystemHealthScore($profile) {
     $brokenSvcs = (Get-Service | Where-Object { $_.StartType -eq "Automatic" -and $_.Status -ne "Running" }).Count
     $score -= [math]::Min($brokenSvcs * 2, 10)
     $tempSize = 0
-    try { $tempSize = (Get-ChildItem -Path $env:TEMP -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum } catch {}
+    try { $tempSize = (Get-ChildItem -Path $env:TEMP -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum } catch { $null }
     if ($tempSize -gt 500MB) { $score -= 5 }
     $pf = Get-WmiObject Win32_PageFileUsage -ErrorAction SilentlyContinue
     if ($profile.Memory.TotalGB -ge 16 -and $pf -and $pf.AllocatedBaseSize -lt 4096) { $score -= 5 }
@@ -177,7 +178,7 @@ function Get-SystemHealthScore($profile) {
         foreach ($pat in $roguePatterns) {
             if ($regCU.PSObject.Properties.Name -like $pat) { $score -= 15; break }
         }
-    } catch {}
+    } catch { $null }
     return [math]::Max(0, $score)
 }
 
@@ -242,7 +243,7 @@ function Invoke-Phase0-DriverHealthCheck($profile) {
             $m.Substring(0, [Math]::Min(100, $m.Length)).Replace("`r","").Replace("`n"," ")
         }}
         $eventErrors = $events
-    } catch {}
+    } catch { $null }
 
     $script:DriverReport.EventErrors = $eventErrors
     if ($eventErrors.Count -gt 0) {
@@ -276,7 +277,7 @@ function Invoke-Phase0-DriverHealthCheck($profile) {
                         Provider = $drv.DriverProviderName
                     }
                 }
-            } catch {}
+            } catch { $null }
         }
         if ($drv.IsSigned -eq $false) {
             $unsigned += [PSCustomObject]@{
@@ -315,7 +316,7 @@ function Invoke-Phase0-DriverHealthCheck($profile) {
     if (-not $gpuDriver) { $gpuDriver = $gpuCandidates | Select-Object -First 1 }
     if ($gpuDriver) {
         $gpuDate = "Unknown"
-        try { $gpuDate = ([DateTime]$gpuDriver.DriverDate).ToString("yyyy-MM-dd") } catch {}
+        try { $gpuDate = ([DateTime]$gpuDriver.DriverDate).ToString("yyyy-MM-dd") } catch { $null }
         $script:DriverReport.GPUInfo = @{
             Name = $gpuDriver.DeviceName
             Version = $gpuDriver.DriverVersion
@@ -422,7 +423,7 @@ function Invoke-Phase4-ServiceOptimization($level) {
     Write-Title "Phase 4: Service Optimization"
     if (-not $script:IsAdmin) { Write-Warn "Admin rights required. Skipping service optimization."; return }
     $disableMap = @{
-        lowend = @("DiagTrack","dmwappushservice","SysMain","WSearch","PcaSvc","TabletInputService","Fax","WMPNetworkSvc","MapsBroker","XblAuthManager","XblGameSave","XboxNetApiSvc","XboxGipSvc")
+        lowend = @("DiagTrack","dmwappushservice","SysInvoke-Main","WSearch","PcaSvc","TabletInputService","Fax","WMPNetworkSvc","MapsBroker","XblAuthManager","XblGameSave","XboxNetApiSvc","XboxGipSvc")
         safe = @("DiagTrack","dmwappushservice","PcaSvc","Fax","WMPNetworkSvc","MapsBroker")
         mainstream = @("DiagTrack","dmwappushservice","PcaSvc","Fax","WMPNetworkSvc","MapsBroker")
         highperf = @("DiagTrack","dmwappushservice","PcaSvc","Fax","WMPNetworkSvc")
@@ -562,20 +563,20 @@ function Invoke-Phase12-DeepClean {
     Write-Title "Phase 12: Deep Cleanup"
     $temp = $env:TEMP
     $before = 0
-    try { $before = (Get-ChildItem -Path $temp -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum } catch {}
+    try { $before = (Get-ChildItem -Path $temp -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum } catch { $null }
     Remove-Item -Path "$temp\*" -Recurse -Force -ErrorAction SilentlyContinue
     $after = 0
-    try { $after = (Get-ChildItem -Path $temp -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum } catch {}
+    try { $after = (Get-ChildItem -Path $temp -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum } catch { $null }
     $freed = [math]::Round(($before - $after) / 1MB, 2)
     Write-Info "User Temp freed: ${freed} MB"
 
     if ($script:IsAdmin) {
         $winTemp = "C:\Windows\Temp"
         $before2 = 0
-        try { $before2 = (Get-ChildItem -Path $winTemp -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum } catch {}
+        try { $before2 = (Get-ChildItem -Path $winTemp -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum } catch { $null }
         Remove-Item -Path "$winTemp\*" -Recurse -Force -ErrorAction SilentlyContinue
         $after2 = 0
-        try { $after2 = (Get-ChildItem -Path $winTemp -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum } catch {}
+        try { $after2 = (Get-ChildItem -Path $winTemp -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum } catch { $null }
         $freed2 = [math]::Round(($before2 - $after2) / 1MB, 2)
         Write-Info "Windows Temp freed: ${freed2} MB"
     } else {
@@ -781,7 +782,7 @@ reg import "`$bd\HKCU_Run.reg"
     return $reportPath
 }
 
-function Main {
+function Invoke-Main {
     Write-Title "Windows Hardware Optimizer v2.1"
     Write-Host "  Mode: $(if($WhatIf){'WhatIf'}else{'Execute'}) | Level: $Level | DeepClean: $DeepClean | FixDrivers: $FixDrivers | Admin: $script:IsAdmin"
     Write-Host "========================================" -ForegroundColor Cyan
