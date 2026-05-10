@@ -6,11 +6,12 @@ param(
     [switch]$SkipRestorePoint,
     [switch]$WhatIf,
     [switch]$AutoConfirm,
+    [switch]$FixDrivers,
     [string[]]$Whitelist = @()
 )
 
 $ErrorActionPreference = "Stop"
-$host.ui.RawUI.WindowTitle = "Windows Hardware Optimizer v2.0"
+$host.ui.RawUI.WindowTitle = "Windows Hardware Optimizer v2.1"
 $script:StartTime = Get-Date
 $script:BackupDir = $null
 $script:Results = @{
@@ -19,6 +20,7 @@ $script:Results = @{
     Errors = @()
     Warnings = @()
 }
+$script:DriverReport = $null
 $script:IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
 function Write-Title($text) {
@@ -189,6 +191,151 @@ function New-OptimizationBackup {
     Get-Service | Select-Object Name, Status, StartType | Export-Csv "$dir\Services_Backup.csv" -NoTypeInformation
     Get-ScheduledTask | Select-Object TaskName, TaskPath, State | Export-Csv "$dir\Tasks_Backup.csv" -NoTypeInformation
     return $dir
+}
+
+function Invoke-Phase0-DriverHealthCheck($profile) {
+    Write-Title "Phase 0: Driver Health Check"
+    $script:DriverReport = @{
+        ProblemDevices = @()
+        EventErrors = @()
+        OutdatedDrivers = @()
+        UnsignedDrivers = @()
+        GPUInfo = @{}
+        ActionsTaken = @()
+        Summary = ""
+    }
+
+    # 1. Abnormal status devices (Error/Degraded only; Unknown is too noisy for HID/USB sub-devices)
+    $badStatuses = @("Error", "Degraded")
+    $excludedClasses = @("SoftwareComponent", "Processor", "System", "Computer", "Battery", "PrintQueue", "SoftwareDevice")
+    $problemDevices = Get-PnpDevice | Where-Object {
+        $badStatuses -contains $_.Status -and $excludedClasses -notcontains $_.Class
+    } | Select-Object FriendlyName, InstanceId, Status, Class
+
+    $script:DriverReport.ProblemDevices = $problemDevices
+    if ($problemDevices.Count -gt 0) {
+        Write-Warn "Found $($problemDevices.Count) device(s) with abnormal status"
+        foreach ($dev in $problemDevices | Select-Object -First 5) {
+            Write-Host "       - $($dev.FriendlyName) [$($dev.Class)]: $($dev.Status)" -ForegroundColor DarkYellow
+        }
+        if ($problemDevices.Count -gt 5) {
+            Write-Host "       ... and $($problemDevices.Count - 5) more" -ForegroundColor DarkYellow
+        }
+    } else {
+        Write-Info "All devices reporting normal status"
+    }
+
+    # 2. Event log driver errors (7 days)
+    $driverProviders = @("e1dexpress", "nvlddmkm", "amdkmdag", "igfx", "iastora", "stornvme", "iaStorAC", "storahci", "disk", "Netwtw", "rtwlane", "bcmfn", "bthusb")
+    $eventErrors = @()
+    try {
+        $events = Get-WinEvent -FilterHashtable @{
+            LogName = 'System'
+            Level = 1,2,3
+            StartTime = (Get-Date).AddDays(-7)
+        } -ErrorAction SilentlyContinue | Where-Object {
+            $provider = $_.ProviderName.ToLower()
+            $msg = if ($_.Message) { $_.Message.ToLower() } else { "" }
+            ($driverProviders -contains $provider) -or ($msg -match "driver|驱动|device|display|nvidia|amd|radeon|intel|gpu")
+        } | Select-Object -First 10 TimeCreated, LevelDisplayName, ProviderName, Id, @{N="Message";E={
+            $m = $_.Message
+            $m.Substring(0, [Math]::Min(100, $m.Length)).Replace("`r","").Replace("`n"," ")
+        }}
+        $eventErrors = $events
+    } catch {}
+
+    $script:DriverReport.EventErrors = $eventErrors
+    if ($eventErrors.Count -gt 0) {
+        Write-Warn "Found $($eventErrors.Count) driver-related event error(s) in last 7 days"
+        foreach ($e in $eventErrors | Select-Object -First 3) {
+            Write-Host "       - [$($e.ProviderName) ID:$($e.Id)] $($e.Message)..." -ForegroundColor DarkYellow
+        }
+    } else {
+        Write-Info "No driver errors in event log (last 7 days)"
+    }
+
+    # 3. Driver version and age check
+    $now = Get-Date
+    $twoYearsAgo = $now.AddYears(-2)
+    $signedDrivers = Get-CimInstance Win32_PnPSignedDriver | Where-Object { $_.DeviceName -and $_.DriverVersion }
+
+    $outdated = @()
+    $unsigned = @()
+    foreach ($drv in $signedDrivers) {
+        # Skip Microsoft system drivers (date is usually 2006 for inbox drivers)
+        $isMicrosoftInbox = ($drv.DriverProviderName -eq "Microsoft") -or ($drv.DriverVersion -match "^10\.0\.\d+")
+        if ($isMicrosoftInbox) { continue }
+        if ($drv.DriverDate) {
+            try {
+                $drvDate = [DateTime]$drv.DriverDate
+                if ($drvDate -lt $twoYearsAgo) {
+                    $outdated += [PSCustomObject]@{
+                        Device = $drv.DeviceName
+                        Version = $drv.DriverVersion
+                        Date = $drvDate.ToString("yyyy-MM-dd")
+                        Provider = $drv.DriverProviderName
+                    }
+                }
+            } catch {}
+        }
+        if ($drv.IsSigned -eq $false) {
+            $unsigned += [PSCustomObject]@{
+                Device = $drv.DeviceName
+                Version = $drv.DriverVersion
+                Provider = $drv.DriverProviderName
+            }
+        }
+    }
+
+    $script:DriverReport.OutdatedDrivers = $outdated
+    $script:DriverReport.UnsignedDrivers = $unsigned
+
+    if ($outdated.Count -gt 0) {
+        Write-Warn "Found $($outdated.Count) driver(s) older than 2 years"
+        foreach ($o in $outdated | Select-Object -First 3) {
+            Write-Host "       - $($o.Device) v$($o.Version) ($($o.Date))" -ForegroundColor DarkYellow
+        }
+    } else {
+        Write-Info "All drivers updated within 2 years"
+    }
+
+    if ($unsigned.Count -gt 0) {
+        Write-Warn "Found $($unsigned.Count) unsigned driver(s)"
+        foreach ($u in $unsigned | Select-Object -First 3) {
+            Write-Host "       - $($u.Device) v$($u.Version)" -ForegroundColor DarkYellow
+        }
+    } else {
+        Write-Info "All drivers are signed"
+    }
+
+    # 4. GPU driver details (prefer actual GPU over audio/HMDI sub-devices)
+    $gpuCandidates = $signedDrivers | Where-Object { $_.DeviceName -match "NVIDIA|AMD|Radeon|Intel.*Arc|Intel\(R\)\s*Graphics|GeForce|RTX|GTX" }
+    $gpuDriver = $gpuCandidates | Where-Object { $_.DeviceName -match "GeForce|RTX|GTX|Radeon|Arc" } | Select-Object -First 1
+    if (-not $gpuDriver) { $gpuDriver = $gpuCandidates | Where-Object { $_.DeviceName -notmatch "Audio|HDMI" } | Select-Object -First 1 }
+    if (-not $gpuDriver) { $gpuDriver = $gpuCandidates | Select-Object -First 1 }
+    if ($gpuDriver) {
+        $gpuDate = "Unknown"
+        try { $gpuDate = ([DateTime]$gpuDriver.DriverDate).ToString("yyyy-MM-dd") } catch {}
+        $script:DriverReport.GPUInfo = @{
+            Name = $gpuDriver.DeviceName
+            Version = $gpuDriver.DriverVersion
+            Date = $gpuDate
+            Provider = $gpuDriver.DriverProviderName
+        }
+        Write-Info "GPU Driver: $($gpuDriver.DeviceName) v$($gpuDriver.DriverVersion) ($gpuDate)"
+    }
+
+    $issues = $problemDevices.Count + $eventErrors.Count + $outdated.Count + $unsigned.Count
+    if ($issues -eq 0) {
+        $script:DriverReport.Summary = "All driver checks passed"
+    } else {
+        $parts = @()
+        if ($problemDevices.Count -gt 0) { $parts += "$($problemDevices.Count) problem device(s)" }
+        if ($eventErrors.Count -gt 0) { $parts += "$($eventErrors.Count) event error(s)" }
+        if ($outdated.Count -gt 0) { $parts += "$($outdated.Count) outdated driver(s)" }
+        if ($unsigned.Count -gt 0) { $parts += "$($unsigned.Count) unsigned driver(s)" }
+        $script:DriverReport.Summary = $parts -join ", "
+    }
 }
 
 function Invoke-Phase1-Diagnosis($profile) {
@@ -462,6 +609,51 @@ function Invoke-Phase12-DeepClean {
     }
 }
 
+function Invoke-Phase13-DriverRepair {
+    Write-Title "Phase 13: Driver Auxiliary Repair"
+    if (-not $script:IsAdmin) {
+        Write-Warn "Admin rights required. Skipping driver repair."
+        return
+    }
+    if ($script:DriverReport.ProblemDevices.Count -eq 0) {
+        Write-Info "No problem devices to repair"
+        return
+    }
+
+    $restarted = 0
+    foreach ($dev in $script:DriverReport.ProblemDevices) {
+        try {
+            $proc = Start-Process -FilePath "pnputil" -ArgumentList "/restart-device", "$($dev.InstanceId)" -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop
+            if ($proc.ExitCode -eq 0) {
+                Write-Info "Restarted device: $($dev.FriendlyName)"
+                $restarted++
+                $script:DriverReport.ActionsTaken += "Restarted: $($dev.FriendlyName)"
+            } else {
+                Write-Warn "pnputil failed to restart $($dev.FriendlyName) (exit $($proc.ExitCode))"
+            }
+        } catch {
+            Write-Warn "Failed to restart $($dev.FriendlyName): $_"
+        }
+    }
+
+    if ($restarted -eq 0 -and $script:DriverReport.ProblemDevices.Count -gt 0) {
+        Write-Warn "Could not restart any problem devices via pnputil"
+    }
+
+    Write-Host "[DIAG] Scanning for hardware changes (pnputil)..." -ForegroundColor DarkCyan
+    try {
+        $proc = Start-Process -FilePath "pnputil" -ArgumentList "/scan-devices" -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop
+        if ($proc.ExitCode -eq 0) {
+            Write-Info "PnP device scan completed"
+            $script:DriverReport.ActionsTaken += "PnP scan completed"
+        } else {
+            Write-Warn "PnP scan exited with code $($proc.ExitCode)"
+        }
+    } catch {
+        Write-Warn "PnP scan failed: $_"
+    }
+}
+
 function Invoke-GamingExtras($profile) {
     Write-Title "Gaming Mode Extras"
     if (-not $script:IsAdmin) { Write-Warn "Admin rights required. Skipping gaming extras."; return }
@@ -536,6 +728,20 @@ Duration: ${elapsed} minutes
 
 - **Score**: $score/100 ($scoreColor)
 
+## Driver Health Status
+
+| Check | Count | Status |
+|-------|:-----:|--------|
+| Problem Devices | $($script:DriverReport.ProblemDevices.Count) | $(if($script:DriverReport.ProblemDevices.Count -eq 0){"✅ Normal"}else{"⚠️ $($script:DriverReport.ProblemDevices.Count) abnormal"}) |
+| Event Errors (7d) | $($script:DriverReport.EventErrors.Count) | $(if($script:DriverReport.EventErrors.Count -eq 0){"✅ None"}else{"⚠️ $($script:DriverReport.EventErrors.Count) errors"}) |
+| Outdated (>2yr) | $($script:DriverReport.OutdatedDrivers.Count) | $(if($script:DriverReport.OutdatedDrivers.Count -eq 0){"✅ Up to date"}else{"⚠️ $($script:DriverReport.OutdatedDrivers.Count) outdated"}) |
+| Unsigned | $($script:DriverReport.UnsignedDrivers.Count) | $(if($script:DriverReport.UnsignedDrivers.Count -eq 0){"✅ All signed"}else{"⚠️ $($script:DriverReport.UnsignedDrivers.Count) unsigned"}) |
+| GPU Driver | - | $(if($script:DriverReport.GPUInfo.Name){"$($script:DriverReport.GPUInfo.Name) v$($script:DriverReport.GPUInfo.Version) ($($script:DriverReport.GPUInfo.Date))"}else{"Unknown"}) |
+
+$(if($script:DriverReport.ProblemDevices.Count -gt 0){"### Problem Devices`n" + (($script:DriverReport.ProblemDevices | ForEach-Object { "- $($_.FriendlyName) [$($_.Class)]: $($_.Status)" }) -join "`n") + "`n`n"})
+$(if($script:DriverReport.EventErrors.Count -gt 0){"### Driver Event Errors`n" + (($script:DriverReport.EventErrors | ForEach-Object { "- [$($_.ProviderName) ID:$($_.Id)] $($_.Message)" }) -join "`n") + "`n`n"})
+$(if($script:DriverReport.ActionsTaken.Count -gt 0){"### Driver Repair Actions`n" + (($script:DriverReport.ActionsTaken | ForEach-Object { "- $_" }) -join "`n") + "`n`n"})
+
 ## Matched Strategy
 
 Configuration classified as **$level**. Corresponding strategy applied.
@@ -576,8 +782,8 @@ reg import "`$bd\HKCU_Run.reg"
 }
 
 function Main {
-    Write-Title "Windows Hardware Optimizer v2.0"
-    Write-Host "  Mode: $(if($WhatIf){'WhatIf'}else{'Execute'}) | Level: $Level | DeepClean: $DeepClean | Admin: $script:IsAdmin"
+    Write-Title "Windows Hardware Optimizer v2.1"
+    Write-Host "  Mode: $(if($WhatIf){'WhatIf'}else{'Execute'}) | Level: $Level | DeepClean: $DeepClean | FixDrivers: $FixDrivers | Admin: $script:IsAdmin"
     Write-Host "========================================" -ForegroundColor Cyan
 
     $profile = Get-HardwareProfile
@@ -604,6 +810,8 @@ function Main {
     Write-Host "`n>>> Detected Level: $detectedLevel | Execute Level: $Level <<<" -ForegroundColor Green
     Write-Host ">>> Health Score: $healthScore/100 <<<" -ForegroundColor $(if($healthScore -ge 80){"Green"}elseif($healthScore -ge 60){"Yellow"}else{"Red"})
 
+    Invoke-Phase0-DriverHealthCheck $profile
+
     if ($WhatIf) {
         Write-Host "`n[WhatIf] Diagnosis only. No changes made." -ForegroundColor Magenta
         Write-Host "To execute: .\Optimize-Windows.ps1 -Level $Level $(if($DeepClean){'-DeepClean'})"
@@ -627,6 +835,7 @@ function Main {
     Invoke-Phase10-Privacy
     Invoke-Phase11-Visual $Level
     if ($DeepClean) { Invoke-Phase12-DeepClean }
+    if ($FixDrivers) { Invoke-Phase13-DriverRepair }
     if ($Level -eq "gaming") { Invoke-GamingExtras $profile }
     if ($Level -eq "workstation") { Invoke-WorkstationExtras $profile }
 
