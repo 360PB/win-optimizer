@@ -1,76 +1,74 @@
-# Win Optimizer
+# Win Optimizer / Windows 自适应硬件优化专家
 
-> **English** | [简体中文](README.zh-CN.md)
+> **简体中文** | [English](README.en.md)
 
-> Windows adaptive hardware optimization expert - A [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) Skill.
+> 一个 [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) Skill，智能诊断硬件配置与系统健康，自动匹配并执行分级优化策略。
 
-Auto-detects your hardware specs, scores system health, and executes tiered optimization strategies safely.
+## 功能特性
 
-## Features
+- **硬件画像**：CPU / 内存 / 磁盘类型（SSD/NVMe/HDD）/ 显卡（准确显存）/ 显示器（EDID）/ 分辨率
+- **健康评分**：0-100 分，基于 8 个维度自动评级
+- **五级策略**：低配 `lowend` / 主流 `mainstream` / 高性能 `highperf` / 游戏 `gaming` / 工作站 `workstation`
+- **十二阶段执行**：诊断 → 流氓软件清理 → 启动项 → 服务 → 计划任务 → 电源 → 内存 → 磁盘 → 网络 → 隐私 → 视觉效果 → 深度清理
+- **安全机制**：自动备份注册表/服务/计划任务 + 创建系统还原点
+- **权限自适应**：非管理员可运行（跳过高权限操作），管理员可执行完整优化
 
-- **Hardware Detection**: CPU / Memory / Disk (SSD/NVMe/HDD) / GPU (accurate VRAM) / Monitor (EDID) / Resolution
-- **Health Score**: 0-100 rating based on 8 dimensions
-- **Tiered Optimization**: `lowend` | `mainstream` | `highperf` | `gaming` | `workstation`
-- **12-Phase Execution**: From diagnosis to deep cleanup
-- **Safety First**: Auto backup registry/services/tasks + system restore point
-- **Admin Adaptive**: Runs without admin (skips high-privilege ops), or full power with admin
+## 快速开始
 
-## Quick Start
-
-### Install as Kimi Skill
+### 安装为 Kimi Skill
 
 ```bash
-# Clone to Kimi skills directory
+# 克隆到 Kimi skills 目录
 git clone https://github.com/360PB/win-optimizer.git ~/.kimi/skills/windows-hardware-optimizer
 ```
 
-### Run Directly
+### 直接运行
 
 ```powershell
-# Diagnosis only
+# 仅诊断（不执行任何修改）
 .\scripts\Optimize-Windows.ps1 -WhatIf
 
-# Full optimization (admin recommended)
+# 全自动优化（推荐以管理员身份运行）
 .\scripts\Optimize-Windows.ps1 -Level auto -DeepClean
 
-# Gaming mode
+# 游戏模式
 .\scripts\Optimize-Windows.ps1 -Level gaming -DeepClean
 
-# Auto-run without prompts (for batch files)
+# 自动模式（无交互确认，适合批处理）
 .\scripts\Optimize-Windows.ps1 -Level auto -DeepClean -AutoConfirm
 ```
 
-## Parameters
+## 参数说明
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `-Level` | string | `auto` | `auto` / `safe` / `aggressive` / `gaming` / `workstation` |
-| `-DeepClean` | switch | `$false` | Enable Temp/cache/DISM cleanup |
-| `-SkipRestorePoint` | switch | `$false` | Skip creating system restore point |
-| `-WhatIf` | switch | `$false` | Diagnosis only, no changes |
-| `-AutoConfirm` | switch | `$false` | Skip interactive prompts (for batch) |
-| `-Whitelist` | string[] | `@()` | Extra protected items (wildcards supported) |
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `-Level` | string | `auto` | 优化级别：`auto`/`safe`/`aggressive`/`gaming`/`workstation` |
+| `-DeepClean` | switch | `$false` | 启用深度清理（Temp/缓存/DISM组件存储） |
+| `-SkipRestorePoint` | switch | `$false` | 跳过创建系统还原点 |
+| `-WhatIf` | switch | `$false` | 仅诊断，不执行任何修改 |
+| `-AutoConfirm` | switch | `$false` | 自动确认，跳过交互提示（适合批处理） |
+| `-Whitelist` | string[] | `@()` | 额外保护的启动项/服务名（支持通配符） |
 
-## 12-Phase Optimization
+## 十二阶段优化清单
 
-| Phase | Operation | Admin Required |
-|-------|-----------|:--------------:|
-| 1 | Diagnosis & Backup | ✅ |
-| 2 | Rogue Software Cleanup | - |
-| 3 | Startup Cleanup | - |
-| 4 | Service Optimization | ✅ |
-| 5 | Scheduled Task Optimization | ✅ |
-| 6 | Power & Performance | ✅ |
-| 7 | Memory & Virtual Memory | ✅ |
-| 8 | Disk Optimization | ✅ |
-| 9 | Network Optimization | ✅ |
-| 10 | Privacy & Telemetry | ✅ |
-| 11 | Visual Effects & UI | - |
-| 12 | Deep Cleanup | Partial |
+| 阶段 | 操作内容 | 需要管理员 |
+|------|---------|:----------:|
+| 1 | 硬件诊断、健康评分、创建还原点、导出备份 | ✅ |
+| 2 | 流氓软件启动项清理（360画报等） | - |
+| 3 | 高影响启动项禁用（保留白名单） | - |
+| 4 | 服务优化（DiagTrack/SysMain/Xbox等） | ✅ |
+| 5 | 计划任务精简（QQBrowser/WPS/SoftMgr等） | ✅ |
+| 6 | 电源计划（卓越性能/高性能） | ✅ |
+| 7 | 虚拟内存固定大小（减少SSD写入放大） | ✅ |
+| 8 | 磁盘优化（TRIM/禁用碎片整理/存储感知） | ✅ |
+| 9 | 网络优化（QoS/TCP窗口/RSS） | ✅ |
+| 10 | 隐私清理（遥测/广告ID/活动历史/自动播放） | ✅ |
+| 11 | 视觉效果调整（按级别） | - |
+| 12 | 深度清理（Temp/缩略图/浏览器缓存/DISM） | 部分 |
 
-## Report Example
+## 报告示例
 
-After execution, a Markdown report is generated on your desktop:
+执行完成后，桌面自动生成 Markdown 报告：
 
 ```markdown
 # Windows Adaptive Optimization Report v2.0
@@ -89,15 +87,15 @@ After execution, a Markdown report is generated on your desktop:
 - **Score**: 80/100 (🟢)
 ```
 
-## Safety & Rollback
+## 安全与回滚
 
-Auto-created on every run:
-- **System Restore Point**: Roll back via System Protection
-- **Registry Backup**: `C:\Windows\Temp\WinOpt_Backup_*\*.reg`
-- **Service Backup**: `Services_Backup.csv`
-- **Task Backup**: `Tasks_Backup.csv`
+每次执行自动创建：
+- **系统还原点**：可在「系统保护」中回滚
+- **注册表备份**：`C:\Windows\Temp\WinOpt_Backup_*\*.reg`
+- **服务状态备份**：`Services_Backup.csv`
+- **计划任务备份**：`Tasks_Backup.csv`
 
-One-click rollback (Admin PowerShell):
+一键回滚命令（管理员 PowerShell）：
 ```powershell
 $bd = (Get-ChildItem C:\Windows\Temp\WinOpt_Backup_* | Sort-Object CreationTime -Descending | Select-Object -First 1).FullName
 Import-Csv "$bd\Services_Backup.csv" | ForEach-Object { Set-Service -Name $_.Name -StartupType $_.StartType -ErrorAction SilentlyContinue }
