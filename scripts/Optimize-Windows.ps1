@@ -708,7 +708,7 @@ function New-OptimizationReport($profile, $level, $score) {
     $warningItems = ($script:Results.Warnings | ForEach-Object { "- ⚠ $_" }) -join "`n"
 
     $report = @"
-# Windows Adaptive Optimization Report v2.0
+# Windows Adaptive Optimization Report v2.1
 
 Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 Duration: ${elapsed} minutes
