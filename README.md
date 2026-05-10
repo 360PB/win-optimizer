@@ -9,7 +9,7 @@
 - **硬件画像**：CPU / 内存 / 磁盘类型（SSD/NVMe/HDD）/ 显卡（准确显存）/ 显示器（EDID）/ 分辨率
 - **健康评分**：0-100 分，基于 8 个维度自动评级
 - **五级策略**：低配 `lowend` / 主流 `mainstream` / 高性能 `highperf` / 游戏 `gaming` / 工作站 `workstation`
-- **十二阶段执行**：诊断 → 流氓软件清理 → 启动项 → 服务 → 计划任务 → 电源 → 内存 → 磁盘 → 网络 → 隐私 → 视觉效果 → 深度清理
+- **十三阶段执行**：诊断 → 流氓软件清理 → 启动项 → 服务 → 计划任务 → 电源 → 内存 → 磁盘 → 网络 → 隐私 → 视觉效果 → 深度清理
 - **安全机制**：自动备份注册表/服务/计划任务 + 创建系统还原点
 - **权限自适应**：非管理员可运行（跳过高权限操作），管理员可执行完整优化
 
@@ -49,7 +49,7 @@ git clone https://github.com/360PB/win-optimizer.git ~/.kimi/skills/windows-hard
 | `-AutoConfirm` | switch | `$false` | 自动确认，跳过交互提示（适合批处理） |
 | `-Whitelist` | string[] | `@()` | 额外保护的启动项/服务名（支持通配符） |
 
-## 十二阶段优化清单
+## 十三阶段优化清单
 
 | 阶段 | 操作内容 | 需要管理员 |
 |------|---------|:----------:|
@@ -71,7 +71,7 @@ git clone https://github.com/360PB/win-optimizer.git ~/.kimi/skills/windows-hard
 执行完成后，桌面自动生成 Markdown 报告：
 
 ```markdown
-# Windows Adaptive Optimization Report v2.0
+# Windows Adaptive Optimization Report v2.1
 
 ## Hardware Profile
 | Component | Spec |
