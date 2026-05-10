@@ -7,8 +7,9 @@
 3. [虚拟内存推荐配置](#虚拟内存推荐配置)
 4. [游戏模式深度配置](#游戏模式深度配置)
 5. [工作站模式深度配置](#工作站模式深度配置)
-6. [关键优化原理](#关键优化原理)
-7. [故障排查](#故障排查)
+6. [驱动健康检测与修复](#驱动健康检测与修复)
+7. [关键优化原理](#关键优化原理)
+8. [故障排查](#故障排查)
 
 ---
 
@@ -183,6 +184,50 @@ bcdedit /set disabledynamictick no
 
 - 值=0：启用压缩（默认，推荐≤32GB）
 - 值=1：禁用压缩（推荐≥64GB工作站）
+
+---
+
+## 驱动健康检测与修复
+
+### 检测维度（Phase 0）
+
+| 检测项 | 方法 | 说明 |
+|--------|------|------|
+| 异常状态设备 | `Get-PnpDevice` 筛选 Status=Error/Degraded | 排除SoftwareComponent/Processor/System等虚拟类，避免HID/USB子设备误报 |
+| 事件日志驱动错误 | `Get-WinEvent` System日志 Level 1-3，最近7天 | 关注e1dexpress/nvlddmkm/amdkmdag/igfx等驱动提供商 |
+| 驱动年龄 | `Win32_PnPSignedDriver.DriverDate` | 超过2年标记为过时；自动排除Microsoft inbox驱动（版本10.0.x） |
+| 签名验证 | `Win32_PnPSignedDriver.IsSigned` | 标记未签名驱动 |
+| GPU驱动详情 | `Win32_PnPSignedDriver` + 正则优先匹配 | 优先选择GeForce/RTX/Radeon/Arc，排除Audio/HDMI子设备 |
+
+### 辅助修复（Phase 13，需`-FixDrivers`+管理员）
+
+| 修复项 | 命令 | 风险 |
+|--------|------|------|
+| 重启问题设备 | `pnputil /restart-device <InstanceId>` | 低。设备会短暂离线后恢复 |
+| 扫描硬件变更 | `pnputil /scan-devices` | 零。仅触发系统重新枚举设备 |
+
+### 安全边界
+
+- **绝不自动下载/安装/回滚驱动**：不同厂商API差异大，自动安装风险极高（蓝屏、无法开机）
+- **绝不修改驱动商店（Driver Store）**：旧包清理需要精确版本比对，误删可能导致设备无法识别
+- **仅对已检测到的问题设备操作**：不会主动触碰状态正常的设备
+- **Requires Admin**：非管理员运行时Phase 13自动跳过，Phase 0仍正常执行
+
+### 使用建议
+
+```powershell
+# 检测驱动状态（零风险，默认执行）
+.\Optimize-Windows.ps1 -WhatIf
+
+# 执行优化 + 驱动修复
+.\Optimize-Windows.ps1 -Level auto -FixDrivers
+
+# 手动更新驱动（脚本检测后，用户自行操作）
+# 1. 设备管理器 → 右键问题设备 → 更新驱动
+# 2. NVIDIA: https://www.nvidia.com/drivers
+# 3. AMD: https://www.amd.com/support
+# 4. Intel: https://www.intel.com/content/www/us/en/download-center
+```
 
 ---
 
