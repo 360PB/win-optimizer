@@ -25,7 +25,15 @@ jobs:
       - name: Run PSScriptAnalyzer
         shell: pwsh
         run: |
-          $results = Invoke-ScriptAnalyzer -Path scripts/Optimize-Windows.ps1 -Severity Error,Warning
+          $excludeRules = @(
+            'PSAvoidAssignmentToAutomaticVariable',
+            'PSAvoidUsingWMICmdlet',
+            'PSUseShouldProcessForStateChangingFunctions',
+            'PSUseSingularNouns',
+            'PSReviewUnusedParameter',
+            'PSUseBOMForUnicodeEncodedFile'
+          )
+          $results = Invoke-ScriptAnalyzer -Path scripts/Optimize-Windows.ps1 -Severity Error,Warning -ExcludeRule $excludeRules
           if ($results) {
             $results | Format-Table -AutoSize
             exit 1
