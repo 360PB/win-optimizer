@@ -90,7 +90,7 @@ function Get-HardwareProfile {
             if ($displayMemory) { $p.GPU.VRAMGB = [math]::Round([int]$displayMemory / 1024, 1) }
             Remove-Item -Path $dxDiagFile -Force -ErrorAction SilentlyContinue
         }
-        if ($p.GPU.Name -eq $null) {
+        if ($null -eq $p.GPU.Name) {
             $gpu = Get-CimInstance Win32_VideoController | Where-Object { $_.Name -notmatch "Basic Display|Microsoft Remote|OrayIddDriver|RDP|Mirror" } | Select-Object -First 1
             if ($gpu) {
                 $p.GPU.Name = $gpu.Name.Trim()
